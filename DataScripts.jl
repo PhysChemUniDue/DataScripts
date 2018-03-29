@@ -4,14 +4,14 @@ using PyPlot
 using DataFrames
 using SFGTools
 
-export plot_spectra
+export plot
 
-const DATA_PATH = "C:/Users/Admin/Documents/Data"
+const DATA_PATH = "/Users/lackner/Documents/DataSFG"
 
-f = figure()
-close(f)
+# f = figure()
+# close(f)
 
-function plot_spectra(idx=1; pixel=false, sfwl=false)
+function plot(idx=1::Int64; pixel=false, sfwl=false)
     grab(DATA_PATH)
     df = list_spectra()
     sort!(df, cols=:id, rev=true)
