@@ -1,18 +1,19 @@
 module DataScripts
 
+using LsqFit
 using Plots
 using DataFrames
-import SFGTools
+using SFGTools
 
-export plotrecent, pump_probe_process
+export plotrecent, pump_probe_process, cal_spectrometer
 
 const DATA_PATH = "/Users/lackner/Documents/DataSFG"
 
 # f = figure()
 # close(f)
 
-function plotrecent(idx=1::Int64; pixel=false, sfwl=false)
-    grab(DATA_PATH)
+function plotrecent(idx=1; pixel=false, sfwl=false, dograb=false)
+    dograb && grab(DATA_PATH)
     df = list_spectra()
     sort!(df, cols=:id, rev=true)
 
@@ -29,7 +30,10 @@ function plotrecent(idx=1::Int64; pixel=false, sfwl=false)
         data = [data]
     end
 
-    figure()
+    mean!.(data)
+
+    # Empty Plot
+    plot()
     for i = 1:length(data)
         if pixel
             x_binning = get_attribute(data[i], "x_binning")
@@ -45,12 +49,12 @@ function plotrecent(idx=1::Int64; pixel=false, sfwl=false)
         end
 
         name = get_attribute(data[i], "name")
-        plot(x, mean(data[i]), label=name)
-        xlabel(xlabelstr)
-        ylabel("Counts per Second")
+        plot!(x, data[i].s, label=name)
+        xlabel!(xlabelstr)
+        ylabel!("Counts per Second")
     end
-    legend(loc="lower center", bbox_to_anchor=(0.5, 1.0),
-          fancybox=false, shadow=false, ncol=3)
+    gui()
+    return nothing
 end
 
 """
@@ -176,6 +180,102 @@ function pump_probe_process(idarray;
     println("\tDone.")
 
     return spectra, plotarray
+end
+
+
+function cal_spectrometer(idarray)
+
+    data = SFGTools.load_spectra(idarray)
+    SFGTools.mean!.(data)
+    names = get_attribute(data, "name")
+    splitted_names = split.(names, "_")
+
+    λcal = zeros(length(data))
+    locs = fill("", length(data))
+    for i in eachindex(splitted_names)
+        λcal[i] = splitted_names[i][end-1] |> parse
+        locs[i] = splitted_names[i][end]
+    end
+
+    # Check if the data is suitable
+    for i = 1:length(data)
+        length(data[i].s) != 512 && error("All spectra need to have 512 data points")
+        !any(["center", "right", "left"] .== locs[i]) && error("Filenames have to have the form \"*_334.15_left\" etc. (see help)")
+    end
+
+    # Remove everything but the peaks
+    for i in eachindex(data)
+        if locs[i] == "center"
+            data[i].s[[1:236..., 276:end...]] = NaN
+        elseif locs[i] == "left"
+            data[i].s[20:end] = NaN
+        elseif locs[i] == "right"
+            data[i].s[1:end-20] = NaN
+        end
+    end
+
+    peakpositions = fill(0, length(data))
+    for i in 1:length(data)
+        peakpositions[i] = findmax(data[i].s)[2]
+    end
+    peakpositions = reshape(peakpositions, (3, length(data) ÷ 3))'
+    peakpositions = hcat(peakpositions[:,2], peakpositions[:,1], peakpositions[:,3])
+
+    λ_spectrometer = Float64[]
+    for (i, d) in enumerate(data)
+        λ = get_attribute(d, "spectrometer_wavelength")
+        push!(λ_spectrometer, λ)
+    end
+    λ_spectrometer = reshape(λ_spectrometer, (3, 7))'
+    λ_spectrometer = hcat(λ_spectrometer[:,2], λ_spectrometer[:,1], λ_spectrometer[:,3])
+
+    Δp = abs.(diff(peakpositions, 2))
+    Δλ = abs.(diff(λ_spectrometer, 2))
+    nmperpixel = Δλ ./ Δp
+
+    mean_nmperpixel = mean(nmperpixel, 2)
+    mean_nmperpixel = squeeze(mean_nmperpixel, 2)
+
+    model(x, p) = p[1] * x.^2 + p[2] * x + p[3]
+    fit = curve_fit(model, λ_spectrometer[:,2], mean_nmperpixel, [-3e-8, 5e-6, 0.02])
+    xfit = linspace(330, 600, 100)
+    yfit = model(xfit, fit.param)
+
+    p1 = scatter(λ_spectrometer[:,2], mean_nmperpixel)
+    plot!(xfit, yfit)
+    xlabel!("Central Spectrometer Wavelength in nm")
+    ylabel!("Wavelength Density [nm/pixel]")
+
+    # the real center is in between pixels 256 and 257!
+    Δp0 = peakpositions[:,2] - 256.5
+
+    offset_fit = curve_fit(model, λ_spectrometer[:,2], Δp0, [-3e-4, 0.25, -32.0])
+    offset_yfit = model(xfit, offset_fit.param)
+
+    p2 = scatter(λ_spectrometer[:,2], Δp0)
+    plot!(xfit, offset_yfit)
+    xlabel!("Central Spectrometer Wavelength in nm")
+    ylabel!("Pixel Offset")
+
+    plot(p1, p2)
+    gui()
+
+    info("Add the following code to the `get_wavelength` function at the appropriate location in the SFGTools package:")
+
+    println("
+    # Calibration parameters were determined on $(now())
+    # Pixel offset
+    Δp = $(offset_fit.param[1]) * λ0^2 + $(offset_fit.param[2]) * λ0 - $(offset_fit.param[3])
+    # Wavelenths per pixel
+    pλ = $(fit.param[1]) * λ0^2 + $(fit.param[2]) * λ0 + $(fit.param[3])
+    ")
+
+    info("The right location is inside the if-elseif-else statement. Change the last else to:")
+
+    println("elseif date < DateTime(\"$(now())\")")
+
+    info("and add a new final else statement with the above code that contains the calibration parameters.")
+    return nothing
 end
 
 end #module
