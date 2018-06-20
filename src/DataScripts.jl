@@ -30,7 +30,7 @@ function plotrecent(idx=1; pixel=false, sfwl=false, dograb=false)
         data = [data]
     end
 
-    mean!.(data)
+    data = average.(data)
 
     # Empty Plot
     plot()
@@ -66,15 +66,15 @@ Keyword Arguments:
 * `savepath`:   Path were the processed data is stored (default is the folder where the raw data is loaded from)
 * `wlrange`:    Figures are cropped to these xlims (defaults to full range of available values) eg.: `wlrange=(3300, 3600)`
 """
-function pump_probe_process(idarray; 
-    eventwidth=8, 
+function pump_probe_process(idarray;
+    eventwidth=8,
     savepath="default",
     wlrange="default")
 
     print("Loading Data...")
     data = SFGTools.load_spectra(idarray)
     SFGTools.rm_events!.(data)
-    SFGTools.mean!.(data)
+    data = SFGTools.average.(data)
 
     if savepath == "default"
         savepath = splitdir(splitdir(SFGTools.getdir(data[1].id))[1])[1]
@@ -138,7 +138,7 @@ function pump_probe_process(idarray;
     Plots.xlims!(wlrange)
     push!(plotarray, p2)
     Plots.savefig(joinpath(savepath, "heatmap_A.png"))
-    
+
     p3 = heatmap(λ, dltime, hmap[:,:,2], clim=(minimum(hmap), maximum(hmap)))
     Plots.title!(name * "\nB")
     Plots.xlabel!("IR Wavelength [nm]")
@@ -153,7 +153,7 @@ function pump_probe_process(idarray;
     labels=("A", "B")
     anim = Plots.@animate for i = 1:size(hmap, 1)
         print(".")
-        
+
         p1 = Plots.plot(λ, hmap[i,:,:], labels=labels, ylim=(minimum(hmap), maximum(hmap)))
         Plots.title!("Delay = $(round(dltime[i], 1)) ps")
         Plots.ylabel!("Counts [1/s]")
@@ -186,7 +186,7 @@ end
 function cal_spectrometer(idarray)
 
     data = SFGTools.load_spectra(idarray)
-    SFGTools.mean!.(data)
+    data = SFGTools.average.(data)
     names = get_attribute(data, "name")
     splitted_names = split.(names, "_")
 
